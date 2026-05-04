@@ -1,0 +1,176 @@
+name: CI/CD Pipeline (Test - No AWS)
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - release
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (only for manual trigger)'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Build Start
+        run: echo "BUILD job started | event=${{ github.event_name }} | branch=${{ github.ref_name }}"
+
+      - name: Lint (simulated)
+        run: echo "Lint passed"
+
+      - name: Test (simulated)
+        run: echo "Tests passed"
+
+      - name: Build (simulated)
+        run: echo "Build complete"
+
+  validate:
+    needs: [build]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Validate Start
+        run: echo "VALIDATE job started | environment=${{ github.event.inputs.environment }}"
+
+      - name: Check team access (simulated)
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          if [[ "$ENV" == "production" ]]; then
+            echo "Checking prod-team access... OK"
+          else
+            echo "Checking qa-team / prod-team access... OK"
+          fi
+
+  deploy:
+    needs: [build, validate]
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Deploy Start
+        run: echo "DEPLOY job started | event=${{ github.event_name }} | branch=${{ github.ref_name }}"
+
+      - name: Echo Upstream Results
+        run: |
+          echo "build  result: ${{ needs.build.result }}"
+          echo "validate result: ${{ needs.validate.result }}"
+
+      - name: Determine Environment
+        id: setenv
+        run: |
+          EVENT="${{ github.event_name }}"
+          MANUAL_ENV="${{ github.event.inputs.environment }}"
+
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            if [[ "$MANUAL_ENV" == "production" ]]; then
+              echo "name=PROD" >> $GITHUB_OUTPUT
+              echo "app_env=prod" >> $GITHUB_OUTPUT
+              echo "compose_file_1=abibot-plus-docker-compose-prod.yml" >> $GITHUB_OUTPUT
+              echo "compose_file_2=abibot-plus-docker-compose-prod-ha.yml" >> $GITHUB_OUTPUT
+              echo "deploy_path=/opt/beroeEFS" >> $GITHUB_OUTPUT
+            else
+              echo "name=STAGING" >> $GITHUB_OUTPUT
+              echo "app_env=qa" >> $GITHUB_OUTPUT
+              echo "compose_file_1=abibot-plus-docker-compose-test.yml" >> $GITHUB_OUTPUT
+              echo "compose_file_2=abibot-plus-docker-compose-test-ha.yml" >> $GITHUB_OUTPUT
+              echo "deploy_path=/opt/abibot-plus" >> $GITHUB_OUTPUT
+            fi
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            BRANCH="${{ github.ref_name }}"
+            if [[ "$BRANCH" == "release" ]]; then
+              echo "name=PROD" >> $GITHUB_OUTPUT
+              echo "app_env=prod" >> $GITHUB_OUTPUT
+              echo "compose_file_1=abibot-plus-docker-compose-prod.yml" >> $GITHUB_OUTPUT
+              echo "compose_file_2=abibot-plus-docker-compose-prod-ha.yml" >> $GITHUB_OUTPUT
+              echo "deploy_path=/opt/abibot-plus" >> $GITHUB_OUTPUT
+            elif [[ "$BRANCH" == "main" ]]; then
+              echo "name=STAGING" >> $GITHUB_OUTPUT
+              echo "app_env=qa" >> $GITHUB_OUTPUT
+              echo "compose_file_1=abibot-plus-docker-compose-test.yml" >> $GITHUB_OUTPUT
+              echo "compose_file_2=abibot-plus-docker-compose-test-ha.yml" >> $GITHUB_OUTPUT
+              echo "deploy_path=/opt/abibot-plus" >> $GITHUB_OUTPUT
+            else
+              echo "name=DEV" >> $GITHUB_OUTPUT
+              echo "app_env=dev" >> $GITHUB_OUTPUT
+              echo "compose_file=abibot-plus-docker-compose-dev.yml" >> $GITHUB_OUTPUT
+              echo "deploy_path=/opt/abibot-plus" >> $GITHUB_OUTPUT
+            fi
+            if [[ "$BRANCH" == "develop" ]]; then
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_deploy=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Echo Environment
+        run: |
+          echo "Environment : ${{ steps.setenv.outputs.name }}"
+          echo "App Env     : ${{ steps.setenv.outputs.app_env }}"
+          echo "Deploy Path : ${{ steps.setenv.outputs.deploy_path }}"
+          echo "Should Deploy: ${{ steps.setenv.outputs.should_deploy }}"
+
+      - name: Configure AWS Credentials (simulated)
+        run: echo "AWS credentials configured for ${{ steps.setenv.outputs.name }} environment"
+
+      - name: Login to ECR (simulated)
+        run: echo "Logged in to ECR for ${{ steps.setenv.outputs.name }} environment"
+
+      - name: Set Image Variables (simulated)
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          IMAGE_TAG="${{ steps.setenv.outputs.app_env }}-1.0.0"
+          IMAGE_URI="123456789.dkr.ecr.us-east-1.amazonaws.com/abibot:$IMAGE_TAG"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "Image will be: $IMAGE_URI"
+
+      - name: Build Docker Image (simulated)
+        if: github.event_name != 'workflow_dispatch'
+        run: echo "docker build -t $IMAGE_URI . (simulated)"
+
+      - name: Push Docker Image (simulated)
+        if: github.event_name != 'workflow_dispatch'
+        run: echo "docker push $IMAGE_URI (simulated)"
+
+      - name: Prepare Docker Compose (simulated)
+        if: steps.setenv.outputs.should_deploy == 'true'
+        run: |
+          ENV_NAME="${{ steps.setenv.outputs.name }}"
+          if [[ "$ENV_NAME" == "DEV" ]]; then
+            echo "Compose file: ${{ steps.setenv.outputs.compose_file }}"
+          else
+            echo "Compose file 1: ${{ steps.setenv.outputs.compose_file_1 }}"
+            echo "Compose file 2: ${{ steps.setenv.outputs.compose_file_2 }}"
+          fi
+
+      - name: Deploy to EC2 via SSM (simulated)
+        if: steps.setenv.outputs.should_deploy == 'true'
+        run: |
+          ENV_NAME="${{ steps.setenv.outputs.name }}"
+          echo "Deploying to $ENV_NAME..."
+          if [[ "$ENV_NAME" == "DEV" ]]; then
+            echo "  Instance: EC2_INSTANCE_ID_DEV"
+          elif [[ "$ENV_NAME" == "STAGING" ]]; then
+            echo "  Instance 1: EC2_INSTANCE_ID_STAGING_1"
+            echo "  Instance 2: EC2_INSTANCE_ID_STAGING_2"
+          else
+            echo "  Instance 1: EC2_INSTANCE_ID_PROD_1"
+            echo "  Instance 2: EC2_INSTANCE_ID_PROD_2"
+          fi
+          echo "All instances deployed successfully (simulated)"
+
+      - name: Skip Deploy Notice
+        if: steps.setenv.outputs.should_deploy == 'false'
+        run: echo "Docker image built and pushed to ECR — no EC2 deploy for ${{ steps.setenv.outputs.name }} on push"
